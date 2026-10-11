@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delivery Performance | Operations Intelligence</title>
+<style>
+:root{--ink:#142c3b;--muted:#617887;--blue:#176888;--orange:#de7045;--bg:#f3f6f8;--line:#dce5eb}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px system-ui,sans-serif}
+header{background:#123747;color:white;padding:30px max(24px,calc((100vw - 1240px)/2));}
+.eyebrow{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#a8d5dd}h1{margin:8px 0;font-size:32px;letter-spacing:-1px}header p{color:#c9dbe3;margin:0}
+main{max-width:1288px;margin:auto;padding:24px}.banner{padding:13px 18px;background:#fff1da;border:1px solid #efd19d;border-radius:8px;margin-bottom:20px;font-size:13px}
+.filters{display:flex;flex-wrap:wrap;gap:16px;align-items:end;margin-bottom:22px}.filters label{display:grid;gap:6px;font-size:12px;color:var(--muted)}input,select,button,a.button{font:inherit;border:1px solid #cbd8df;border-radius:6px;padding:9px 12px;background:white;color:var(--ink)}button{background:var(--blue);color:white;cursor:pointer}a.button{text-decoration:none;font-size:13px}
+.cards{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}.card,.panel{background:white;border:1px solid var(--line);border-radius:10px;padding:20px}.card .label{font-size:12px;color:var(--muted)}.card strong{display:block;font-size:27px;margin:8px 0}.card small{font-size:11px;color:var(--muted)}.grid{display:grid;grid-template-columns:1.5fr 1fr;gap:18px;margin-top:18px}h2{font-size:16px;margin:0 0 5px}.sub{font-size:12px;color:var(--muted);margin:0 0 18px}.bars{display:grid;gap:9px}.bar-row{display:grid;grid-template-columns:65px 1fr 90px;gap:10px;align-items:center;font-size:12px}.track{height:17px;background:#eef3f6;border-radius:3px;overflow:hidden}.fill{height:100%;background:var(--blue);border-radius:3px}.value{text-align:right;color:var(--muted)}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;padding:11px 9px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--muted);font-weight:500}.notes{margin:18px 0;padding:20px;background:#e8f0f4;border-radius:10px;font-size:13px;line-height:1.7}.notes p{margin:7px 0}footer{font-size:12px;color:var(--muted);margin-top:16px}#status{margin-bottom:14px;color:var(--muted);font-size:13px}svg{width:100%;height:auto}.empty{font-size:13px;color:var(--muted);padding:20px 0}
+@media(max-width:900px){.cards{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}h1{font-size:27px}}
+@media(max-width:480px){main{padding:14px}.cards{grid-template-columns:1fr 1fr}.card{padding:14px}.card strong{font-size:22px}}
+</style>
+</head>
+<body>
+<header><div class="eyebrow">Portfolio project / Operations intelligence</div><h1>Delivery performance</h1><p>Find delivery bottlenecks. Prioritize investigation. Understand customer feedback.</p></header>
+<main>
+<div id="source" class="banner">Loading dataset information…</div>
+<form id="filters" class="filters">
+<label>Purchase date from<input id="start" type="date" required></label>
+<label>Purchase date to<input id="end" type="date" required></label>
+<label>Customer state<select id="state"><option value="">All states</option></select></label>
+<label>Minimum seller deliveries<input id="minimum" type="number" value="30" min="1" max="100000" style="width:150px" required></label>
+<button type="submit">Apply filters</button><a id="export" class="button">Export orders CSV</a>
+</form>
+<div id="status" role="status" aria-live="polite"></div>
+<div id="cards" class="cards"></div>
+<div class="grid">
+ <section class="panel"><h2>Monthly late-delivery rate</h2><p class="sub">Purchase cohorts · percentage of eligible delivered orders</p><div id="monthly"></div></section>
+ <section class="panel"><h2>Delivery by customer state</h2><p class="sub">Bar length shows late rate · label includes eligible delivery count</p><div id="states" class="bars"></div></section>
+</div>
+<div class="grid">
+ <section class="panel"><h2>Seller investigation queue</h2><p class="sub">Ranked by late orders · minimum sample applies only to this table</p><div class="table-wrap"><table><thead><tr><th>Seller</th><th>State</th><th>Deliveries</th><th>Late orders</th><th>Late rate</th><th>Avg. days</th></tr></thead><tbody id="sellers"></tbody></table></div></section>
+ <section class="panel"><h2>Customer review comparison</h2><p class="sub">Average score out of 5 · reviewed eligible deliveries only</p><div id="reviews"></div></section>
+</div>
+<section class="notes"><h2>Read the metrics correctly</h2>
+<p><b>Late delivery:</b> delivery calendar date is after the estimated calendar date. Eligible orders have delivered status, valid dates, and delivery/estimate dates at or after purchase.</p>
+<p><b>Merchandise value:</b> sum of item prices for all filtered orders, including canceled orders. This is recorded order value, not recognized revenue, profit, or payment collections. Freight is separate.</p>
+<p><b>Seller attribution:</b> delivery timing is measured at order level. A multi-seller order appears once per seller, so seller counts cannot be summed into total orders. A late order does not prove a seller caused the delay.</p>
+<p><b>Reviews:</b> use the latest review per order, ordered by creation date then review ID. Missing reviews are excluded from averages. Differences are associations, not causal effects.</p></section>
+<footer id="footer"></footer>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const number=v=>v==null?'—':Number(v).toLocaleString('en-US',{maximumFractionDigits:1});
+const percent=(a,b)=>b?100*a/b:null;
+const escapeHTML=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function card(label,value,note){return `<div class="card"><div class="label">${label}</div><strong>${value}</strong><small>${note}</small></div>`}
+async function json(url){const r=await fetch(url);const data=await r.json();if(!r.ok)throw Error(data.error||'Request failed');return data}
+function trend(records){
+ if(!records.length)return '<p class="empty">No orders in this selection.</p>';
+ const width=650,height=245,left=42,right=20,top=15,bottom=45;
+ const valid=records.map((r,i)=>({i,rate:percent(r.late_deliveries,r.eligible_deliveries)})).filter(r=>r.rate!==null);
+ if(!valid.length)return '<p class="empty">No eligible deliveries in this selection.</p>';
+ const max=Math.min(100,Math.max(10,Math.ceil(Math.max(...valid.map(r=>r.rate))/10)*10));
+ const x=i=>left+i*(width-left-right)/Math.max(1,records.length-1),y=v=>height-bottom-v/max*(height-bottom-top);
+ let content='';
+ for(let tick=0;tick<=4;tick++){const v=tick*max/4;content+=`<line x1="${left}" y1="${y(v)}" x2="${width-right}" y2="${y(v)}" stroke="#dce5eb"/><text x="${left-8}" y="${y(v)+4}" text-anchor="end" font-size="11" fill="#617887">${number(v)}%</text>`}
+ // Draw separate segments across missing cohorts; never imply zero for missing data.
+ for(let i=1;i<records.length;i++){
+   const a=percent(records[i-1].late_deliveries,records[i-1].eligible_deliveries),b=percent(records[i].late_deliveries,records[i].eligible_deliveries);
+   if(a!==null&&b!==null)content+=`<line x1="${x(i-1)}" y1="${y(a)}" x2="${x(i)}" y2="${y(b)}" stroke="#176888" stroke-width="3"/>`;
+ }
+ valid.forEach(r=>{const item=records[r.i];content+=`<circle cx="${x(r.i)}" cy="${y(r.rate)}" r="4" fill="#176888"><title>${escapeHTML(item.purchase_month)}: ${number(r.rate)}%, ${item.eligible_deliveries} deliveries</title></circle>`});
+ records.forEach((r,i)=>{if(i%Math.max(1,Math.ceil(records.length/6))===0||i===records.length-1)content+=`<text x="${x(i)}" y="${height-18}" text-anchor="middle" fill="#617887" font-size="11">${escapeHTML(r.purchase_month)}</text>`});
+ return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Monthly late delivery percentages. Detailed values available below.">${content}</svg><details><summary style="font-size:12px">View monthly values</summary><table><thead><tr><th>Month</th><th>Deliveries</th><th>Late rate</th></tr></thead><tbody>${records.map(r=>`<tr><td>${escapeHTML(r.purchase_month)}</td><td>${number(r.eligible_deliveries)}</td><td>${number(percent(r.late_deliveries,r.eligible_deliveries))}%</td></tr>`).join('')}</tbody></table></details>`;
+}
+let requestId=0;
+async function refresh(){
+ const id=++requestId;
+ if($('start').value>$('end').value){$('status').textContent='Start date must be before end date.';return}
+ const p=new URLSearchParams(Object.fromEntries(['start','end','state','minimum'].map(k=>[k,$(k).value])));
+ $('status').textContent='Loading…';
+ try{
+ const d=await json('/api/data?'+p);if(id!==requestId)return;const s=d.summary;
+ $('cards').innerHTML=card('Orders',number(s.orders),'One row per order')+
+  card('Late-delivery rate',s.eligible_deliveries?number(percent(s.late_deliveries,s.eligible_deliveries))+'%':'—',`${number(s.late_deliveries||0)} late / ${number(s.eligible_deliveries||0)} eligible`)+
+  card('Average delivery',number(s.average_delivery_days)+(s.average_delivery_days==null?'':' days'),'Eligible delivered orders')+
+  card('Merchandise value',s.merchandise_value==null?'—':'R$ '+number(s.merchandise_value),'All orders · freight excluded')+
+  card('Average review',number(s.average_review),`${number(s.reviewed_orders)} reviewed orders · out of 5`);
+ $('monthly').innerHTML=trend(d.monthly);
+ $('states').innerHTML=d.states.map(r=>{const rate=percent(r.late_deliveries,r.eligible_deliveries);return `<div class="bar-row"><span>${escapeHTML(r.customer_state)}</span><div class="track"><div class="fill" style="width:${rate||0}%"></div></div><span class="value">${rate==null?'—':number(rate)+'%'} · n=${number(r.eligible_deliveries)}</span></div>`}).join('')||'<p class="empty">No matching orders.</p>';
+ $('sellers').innerHTML=d.sellers.map(r=>`<tr><td>${escapeHTML(r.seller_id)}</td><td>${escapeHTML(r.seller_state)}</td><td>${number(r.eligible_orders)}</td><td>${number(r.late_orders)}</td><td>${number(r.late_rate_pct)}%</td><td>${number(r.average_delivery_days)}</td></tr>`).join('')||'<tr><td colspan="6">No sellers meet the selected sample threshold.</td></tr>';
+ $('reviews').innerHTML=d.reviews.map(r=>`<div style="margin:20px 0"><b>${escapeHTML(r.delivery_group)}</b><div class="track" style="margin:10px 0"><div class="fill" style="width:${(r.average_review||0)/5*100}%;background:${r.delivery_group==='Late'?'#de7045':'#176888'}"></div></div><span style="font-size:13px">${number(r.average_review)} / 5 · ${number(r.reviewed_orders)} reviews / ${number(r.eligible_deliveries)} deliveries</span></div>`).join('')||'<p class="empty">No eligible deliveries.</p>';
+ $('export').href='/api/export?'+p;$('export').download='filtered-orders.csv';
+ $('status').textContent=`${number(s.orders)} orders selected · ${number(s.canceled_orders||0)} canceled · ${number(s.excluded_deliveries||0)} delivered orders excluded for invalid dates.`;
+ }catch(e){$('status').textContent='Unable to load dashboard: '+e.message}
+}
+$('filters').addEventListener('submit',e=>{e.preventDefault();refresh()});
+(async()=>{try{const m=await json('/api/meta');$('source').textContent=m.source==='SYNTHETIC DEMO'?'SYNTHETIC DEMO — generated data for testing. These patterns are simulated and must not be presented as real findings.':'USER-SUPPLIED CSV — confirm provenance and dataset terms in your README before publishing.';$('start').value=m.start;$('end').value=m.end;m.states.forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v;$('state').append(o)});$('footer').textContent=`Last pipeline build: ${m.built_at_utc} · ${number(m.order_count)} total orders · raw-data checks passed. Refresh the page after rebuilding the database.`;await refresh()}catch(e){$('status').textContent=e.message}})();
+</script>
+</body></html>
