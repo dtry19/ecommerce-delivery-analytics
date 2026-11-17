@@ -1,0 +1,190 @@
+{
+  "source": {
+    "source": "OLIST PUBLIC DATASET",
+    "built_at_utc": "2026-11-17T02:07:22.025448+00:00",
+    "order_count": 99441,
+    "ineligible_delivered_orders": 8,
+    "checks": {
+      "orders_without_customers": 0,
+      "items_without_orders": 0,
+      "items_without_sellers": 0,
+      "reviews_without_orders": 0,
+      "invalid_item_amounts": 0,
+      "invalid_review_scores": 0,
+      "invalid_purchase_dates": 0,
+      "missing_states": 0,
+      "missing_review_identity": 0,
+      "orders_missing_keys": 0,
+      "customers_missing_keys": 0,
+      "sellers_missing_keys": 0,
+      "items_missing_keys": 0
+    },
+    "raw_row_counts": {
+      "orders": 99441,
+      "customers": 99441,
+      "sellers": 3095,
+      "items": 112650,
+      "reviews": 99224
+    },
+    "provenance": {
+      "dataset": "Brazilian E-Commerce Public Dataset by Olist",
+      "publisher": "Olist",
+      "source_url": "https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce",
+      "download_url": "https://www.kaggle.com/api/v1/datasets/download/olistbr/brazilian-ecommerce?datasetVersionNumber=2",
+      "version": 2,
+      "license": "CC BY-NC-SA 4.0",
+      "license_url": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+      "retrieved_at_utc": "2026-11-17T02:07:12.633042+00:00",
+      "archive_sha256": "967e41e04fc306fe604e2a693f488995a8b41e5047418f8a5c8e4abd6deca784",
+      "files": {
+        "olist_customers_dataset.csv": {
+          "rows": 99441,
+          "sha256": "983a422239e1712ded753b3bf9ecf47dc73f144d306029dcfa99e70a226883d2"
+        },
+        "olist_geolocation_dataset.csv": {
+          "rows": 1000163,
+          "sha256": "b514f6fc991b9566aeba02aa5d67e2c3630f034b60a0e05aa0d082a3b66d88d6"
+        },
+        "olist_order_items_dataset.csv": {
+          "rows": 112650,
+          "sha256": "0bc4d068c4fe38cbb01bd90e8746e3c613fe7b4baef75fab7b0e329701c3e279"
+        },
+        "olist_order_payments_dataset.csv": {
+          "rows": 103886,
+          "sha256": "4f713964f2815dbbaa40b9488268c55aac3627bfce5aa96cf58d1f3616de3cc0"
+        },
+        "olist_order_reviews_dataset.csv": {
+          "rows": 99224,
+          "sha256": "012b61c7593e34f51fa614efdf802b9c7056ce6aae5307ddb93236e7cfc797d7"
+        },
+        "olist_orders_dataset.csv": {
+          "rows": 99441,
+          "sha256": "8df58ef3d2d7e9944010f7beecd9b75367f5588ec6e3c91cec19ae3345ef9ecf"
+        },
+        "olist_products_dataset.csv": {
+          "rows": 32951,
+          "sha256": "3e6569628a17fbc75fd206ee357b59e20364b9afa90f5b6cd5b4d624c58aa9cc"
+        },
+        "olist_sellers_dataset.csv": {
+          "rows": 3095,
+          "sha256": "1f643d2b950373b85735e7794b20986f528d7a000432e7c6f9bcbb44d0846a0e"
+        },
+        "product_category_name_translation.csv": {
+          "rows": 71,
+          "sha256": "a81f0d1f27b27e7293f761bc79e3ce8f348ee39c4b3ed3e49bde38f478586278"
+        }
+      }
+    }
+  },
+  "row_counts": {
+    "orders": 99441,
+    "items": 112650,
+    "reviews": 99224,
+    "customers": 99441,
+    "sellers": 3095
+  },
+  "summary": {
+    "orders": 99441,
+    "eligible": 96470,
+    "late": 6534,
+    "reviewed_orders": 98673,
+    "start": "2016-09-04",
+    "end": "2018-10-17"
+  },
+  "tests": {
+    "sample_customers": 92747,
+    "late_customers": 6211,
+    "on_time_customers": 86536,
+    "welch": {
+      "late_mean": 2.2658187087425534,
+      "on_time_mean": 4.288561985763151,
+      "difference": -2.0227432770205973,
+      "ci95": [
+        -2.0625163355358977,
+        -1.982970218505297
+      ],
+      "t": -99.69614464521332,
+      "df": 6697.1843733604765,
+      "p": 0.0,
+      "p_holm": 0.0,
+      "cohens_d": -1.7105813709897182
+    },
+    "chi_squared": {
+      "table": [
+        [
+          78502,
+          8034
+        ],
+        [
+          2326,
+          3885
+        ]
+      ],
+      "row_labels": [
+        "On time",
+        "Late"
+      ],
+      "column_labels": [
+        "3\u20135 stars",
+        "1\u20132 stars"
+      ],
+      "chi2": 14681.211508623443,
+      "df": 1,
+      "p": 0.0,
+      "p_holm": 0.0,
+      "expected_min": 798.1811702804404,
+      "cramers_v": 0.39786067246596224,
+      "late_low_review_pct": 62.55031395910481,
+      "on_time_low_review_pct": 9.283997411481927
+    },
+    "mann_whitney": {
+      "u": 97042650.5,
+      "p": 0.0,
+      "p_holm": 0.0
+    }
+  },
+  "regression": {
+    "formula": "review_score ~ is_late + np.log1p(merchandise_value) + promised_days + seller_count + C(customer_state) + C(purchase_month)",
+    "covariance": "HC3",
+    "n": 92745,
+    "excluded_sparse_month_customers": 2,
+    "minimum_customers_per_month": 30,
+    "r_squared": 0.17837455389196888,
+    "late_coefficient": -1.9952866183985272,
+    "late_ci95": [
+      -2.0356860528337157,
+      -1.9548871839633386
+    ],
+    "late_p": 0.0,
+    "design_rank": 51,
+    "condition_number": 4687.944070899367,
+    "interpretation": "Adjusted historical association, not a causal effect or a validated prediction model."
+  },
+  "benchmark": {
+    "without_index_plan": [
+      "SCAN mart_orders"
+    ],
+    "without_index_median_ms": 6.089541828259826,
+    "with_index_plan": [
+      "SEARCH mart_orders USING INDEX bench_state_date (customer_state=? AND purchased_at>? AND purchased_at<?)"
+    ],
+    "with_index_median_ms": 0.9044159669429064,
+    "repeats": 15,
+    "query": "SELECT COUNT(*),SUM(merchandise_value) FROM mart_orders WHERE customer_state=? AND purchased_at>=? AND purchased_at<?",
+    "parameters": [
+      "SP",
+      "2018-01-01",
+      "2018-02-01"
+    ],
+    "speedup": 6.733120655580204
+  },
+  "versions": {
+    "python": "3.14.2",
+    "sqlite": "3.50.4",
+    "numpy": "2.3.5",
+    "pandas": "2.3.3",
+    "scipy": "1.16.3",
+    "statsmodels": "0.14.6"
+  },
+  "analysis_sample_sha256": "86fd818648ad2935f95afc5c8c5df92f8df9b31ca04377e3c578b611e0540985"
+}

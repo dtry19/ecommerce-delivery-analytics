@@ -23,7 +23,7 @@ main{max-width:1288px;margin:auto;padding:24px}.banner{padding:13px 18px;backgro
 <label>Purchase date from<input id="start" type="date" required></label>
 <label>Purchase date to<input id="end" type="date" required></label>
 <label>Customer state<select id="state"><option value="">All states</option></select></label>
-<label>Minimum seller deliveries<input id="minimum" type="number" value="30" min="1" max="100000" style="width:150px" required></label>
+<label>Minimum seller / route deliveries<input id="minimum" type="number" value="30" min="1" max="100000" style="width:150px" required></label>
 <button type="submit">Apply filters</button><a id="export" class="button">Export orders CSV</a>
 </form>
 <div id="status" role="status" aria-live="polite"></div>
@@ -33,13 +33,19 @@ main{max-width:1288px;margin:auto;padding:24px}.banner{padding:13px 18px;backgro
  <section class="panel"><h2>Delivery by customer state</h2><p class="sub">Bar length shows late rate · label includes eligible delivery count</p><div id="states" class="bars"></div></section>
 </div>
 <div class="grid">
- <section class="panel"><h2>Seller investigation queue</h2><p class="sub">Ranked by late orders · minimum sample applies only to this table</p><div class="table-wrap"><table><thead><tr><th>Seller</th><th>State</th><th>Deliveries</th><th>Late orders</th><th>Late rate</th><th>Avg. days</th></tr></thead><tbody id="sellers"></tbody></table></div></section>
+ <section class="panel"><h2>Seller investigation queue</h2><p class="sub">Ranked by late orders · minimum sample applies to sellers and routes</p><div class="table-wrap"><table><thead><tr><th>Seller</th><th>State</th><th>Deliveries</th><th>Late orders</th><th>Late rate</th><th>Avg. days</th></tr></thead><tbody id="sellers"></tbody></table></div></section>
  <section class="panel"><h2>Customer review comparison</h2><p class="sub">Average score out of 5 · reviewed eligible deliveries only</p><div id="reviews"></div></section>
 </div>
+<div class="grid">
+ <section class="panel"><h2>Delay severity and customer experience</h2><p class="sub">Eligible deliveries · order value is associated merchandise value, not estimated losses</p><div class="table-wrap"><table><thead><tr><th>Delivery outcome</th><th>Orders</th><th>Share</th><th>Order value (R$)</th><th>Avg. review</th><th>1–2 star reviews</th></tr></thead><tbody id="severity"></tbody></table></div></section>
+ <section class="panel"><h2>Shipping route investigation</h2><p class="sub">Seller state → customer state · top 20 by late orders · selected minimum sample applies</p><div class="table-wrap"><table><thead><tr><th>Route</th><th>Deliveries</th><th>Late</th><th>Late rate</th><th>Avg. days late</th></tr></thead><tbody id="routes"></tbody></table></div></section>
+</div>
+<section class="panel" style="margin-top:18px"><h2>Statistical evidence</h2><p class="sub">Full-dataset research · unaffected by dashboard filters · first eligible reviewed order per customer</p><div id="research" role="status" aria-live="polite">Loading research report…</div></section>
 <section class="notes"><h2>Read the metrics correctly</h2>
 <p><b>Late delivery:</b> delivery calendar date is after the estimated calendar date. Eligible orders have delivered status, valid dates, and delivery/estimate dates at or after purchase.</p>
 <p><b>Merchandise value:</b> sum of item prices for all filtered orders, including canceled orders. This is recorded order value, not recognized revenue, profit, or payment collections. Freight is separate.</p>
 <p><b>Seller attribution:</b> delivery timing is measured at order level. A multi-seller order appears once per seller, so seller counts cannot be summed into total orders. A late order does not prove a seller caused the delay.</p>
+<p><b>Routes and severity:</b> each order counts once per seller-state/customer-state pair. Orders with multiple origin states appear on multiple routes; route counts are not additive. Severity buckets partition eligible deliveries. Order value associated with a delay is not lost revenue. Low-review rates use reviewed orders as the denominator. Monthly changes are percentage points against the immediately preceding calendar month; unavailable comparisons show a dash.</p>
 <p><b>Reviews:</b> use the latest review per order, ordered by creation date then review ID. Missing reviews are excluded from averages. Differences are associations, not causal effects.</p></section>
 <footer id="footer"></footer>
 </main>
@@ -66,7 +72,7 @@ function trend(records){
  }
  valid.forEach(r=>{const item=records[r.i];content+=`<circle cx="${x(r.i)}" cy="${y(r.rate)}" r="4" fill="#176888"><title>${escapeHTML(item.purchase_month)}: ${number(r.rate)}%, ${item.eligible_deliveries} deliveries</title></circle>`});
  records.forEach((r,i)=>{if(i%Math.max(1,Math.ceil(records.length/6))===0||i===records.length-1)content+=`<text x="${x(i)}" y="${height-18}" text-anchor="middle" fill="#617887" font-size="11">${escapeHTML(r.purchase_month)}</text>`});
- return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Monthly late delivery percentages. Detailed values available below.">${content}</svg><details><summary style="font-size:12px">View monthly values</summary><table><thead><tr><th>Month</th><th>Deliveries</th><th>Late rate</th></tr></thead><tbody>${records.map(r=>`<tr><td>${escapeHTML(r.purchase_month)}</td><td>${number(r.eligible_deliveries)}</td><td>${number(percent(r.late_deliveries,r.eligible_deliveries))}%</td></tr>`).join('')}</tbody></table></details>`;
+ return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Monthly late delivery percentages. Detailed values available below.">${content}</svg><details><summary style="font-size:12px">View monthly values</summary><table><thead><tr><th>Month</th><th>Deliveries</th><th>Late rate</th><th>Change (pp)</th></tr></thead><tbody>${records.map(r=>`<tr><td>${escapeHTML(r.purchase_month)}</td><td>${number(r.eligible_deliveries)}</td><td>${r.late_rate_pct==null?'—':number(r.late_rate_pct)+'%'}</td><td>${r.late_rate_change_pp==null?'—':(r.late_rate_change_pp>0?'+':'')+number(r.late_rate_change_pp)}</td></tr>`).join('')}</tbody></table></details>`;
 }
 let requestId=0;
 async function refresh(){
@@ -85,11 +91,25 @@ async function refresh(){
  $('states').innerHTML=d.states.map(r=>{const rate=percent(r.late_deliveries,r.eligible_deliveries);return `<div class="bar-row"><span>${escapeHTML(r.customer_state)}</span><div class="track"><div class="fill" style="width:${rate||0}%"></div></div><span class="value">${rate==null?'—':number(rate)+'%'} · n=${number(r.eligible_deliveries)}</span></div>`}).join('')||'<p class="empty">No matching orders.</p>';
  $('sellers').innerHTML=d.sellers.map(r=>`<tr><td>${escapeHTML(r.seller_id)}</td><td>${escapeHTML(r.seller_state)}</td><td>${number(r.eligible_orders)}</td><td>${number(r.late_orders)}</td><td>${number(r.late_rate_pct)}%</td><td>${number(r.average_delivery_days)}</td></tr>`).join('')||'<tr><td colspan="6">No sellers meet the selected sample threshold.</td></tr>';
  $('reviews').innerHTML=d.reviews.map(r=>`<div style="margin:20px 0"><b>${escapeHTML(r.delivery_group)}</b><div class="track" style="margin:10px 0"><div class="fill" style="width:${(r.average_review||0)/5*100}%;background:${r.delivery_group==='Late'?'#de7045':'#176888'}"></div></div><span style="font-size:13px">${number(r.average_review)} / 5 · ${number(r.reviewed_orders)} reviews / ${number(r.eligible_deliveries)} deliveries</span></div>`).join('')||'<p class="empty">No eligible deliveries.</p>';
+ $('severity').innerHTML=d.severity.map(r=>`<tr><td>${escapeHTML(r.delivery_group)}</td><td>${number(r.eligible_deliveries)}</td><td>${s.eligible_deliveries?number(percent(r.eligible_deliveries,s.eligible_deliveries))+'%':'—'}</td><td>${number(r.merchandise_value)}</td><td>${number(r.average_review)} <small>(n=${number(r.reviewed_orders)})</small></td><td>${r.reviewed_orders?number(percent(r.low_reviews,r.reviewed_orders))+'%':'—'} <small>(${number(r.low_reviews)}/${number(r.reviewed_orders)})</small></td></tr>`).join('');
+ $('routes').innerHTML=d.routes.map(r=>`<tr><td>${escapeHTML(r.seller_state)} → ${escapeHTML(r.customer_state)}</td><td>${number(r.eligible_orders)}</td><td>${number(r.late_orders)}</td><td>${number(r.late_rate_pct)}%</td><td>${number(r.average_late_days)}</td></tr>`).join('')||'<tr><td colspan="5">No routes meet the selected sample threshold.</td></tr>';
  $('export').href='/api/export?'+p;$('export').download='filtered-orders.csv';
  $('status').textContent=`${number(s.orders)} orders selected · ${number(s.canceled_orders||0)} canceled · ${number(s.excluded_deliveries||0)} delivered orders excluded for invalid dates.`;
  }catch(e){$('status').textContent='Unable to load dashboard: '+e.message}
 }
+async function loadResearch(){
+ try{
+  const r=await json('/api/research'),t=r.tests,w=t.welch,c=t.chi_squared,g=r.regression;
+  const p=v=>v===0?'&lt; 1e-300':Number(v).toExponential(2);
+  $('research').innerHTML=`<p class="sub">${number(t.sample_customers)} unique customers: ${number(t.late_customers)} late and ${number(t.on_time_customers)} on time. Review coverage and delivery exclusions affect this sample.</p>
+   <div class="table-wrap"><table><thead><tr><th>Method</th><th>Finding</th><th>Uncertainty / effect size</th></tr></thead><tbody>
+   <tr><td>Welch’s t-test</td><td>${number(w.late_mean)} vs ${number(w.on_time_mean)} stars (late / on time)</td><td>Difference ${number(w.difference)} · 95% CI [${w.ci95.map(v=>Number(v).toFixed(2)).join(', ')}] · Holm p ${p(w.p_holm)}</td></tr>
+   <tr><td>Pearson chi-squared</td><td>${number(c.late_low_review_pct)}% vs ${number(c.on_time_low_review_pct)}% low reviews</td><td>Cramér’s V ${c.cramers_v.toFixed(3)} · Holm p ${p(c.p_holm)} · min. expected cell ${number(c.expected_min)}</td></tr>
+   <tr><td>Adjusted OLS (HC3)</td><td>Late-delivery coefficient ${Number(g.late_coefficient).toFixed(2)} stars</td><td>95% CI [${g.late_ci95.map(v=>Number(v).toFixed(2)).join(', ')}] · n=${number(g.n)} · R² ${g.r_squared.toFixed(3)}</td></tr>
+   </tbody></table></div><p class="sub" style="margin-top:14px">Review scores are ordinal; a Mann–Whitney sensitivity test is also reported (Holm p ${p(t.mann_whitney.p_holm)}). OLS controls for order value, promised delivery time, seller count, state and purchase month; ${number(g.excluded_sparse_month_customers)} customers in months with fewer than ${g.minimum_customers_per_month} observations are excluded from regression. These are observational associations, not causal estimates. P-values below numerical precision are shown as &lt; 1e-300.</p>`;
+ }catch(e){$('research').textContent=e.message}
+}
 $('filters').addEventListener('submit',e=>{e.preventDefault();refresh()});
-(async()=>{try{const m=await json('/api/meta');$('source').textContent=m.source==='SYNTHETIC DEMO'?'SYNTHETIC DEMO — generated data for testing. These patterns are simulated and must not be presented as real findings.':'USER-SUPPLIED CSV — confirm provenance and dataset terms in your README before publishing.';$('start').value=m.start;$('end').value=m.end;m.states.forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v;$('state').append(o)});$('footer').textContent=`Last pipeline build: ${m.built_at_utc} · ${number(m.order_count)} total orders · raw-data checks passed. Refresh the page after rebuilding the database.`;await refresh()}catch(e){$('status').textContent=e.message}})();
+(async()=>{try{const m=await json('/api/meta');$('source').textContent=m.source==='SYNTHETIC DEMO'?'SYNTHETIC DEMO — generated data for testing. These patterns are simulated and must not be presented as real findings.':m.source==='OLIST PUBLIC DATASET'?`OLIST PUBLIC DATASET — ${number(m.raw_row_counts.items)} real order items · ${number(m.order_count)} orders · historical Brazilian marketplace data · CC BY-NC-SA 4.0`:'USER-SUPPLIED CSV — confirm provenance and dataset terms in your README before publishing.';$('start').value=m.start;$('end').value=m.end;m.states.forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v;$('state').append(o)});$('footer').textContent=`Last pipeline build: ${m.built_at_utc} · ${number(m.order_count)} total orders · raw-data checks passed. Refresh the page after rebuilding the database.`;await refresh();await loadResearch()}catch(e){$('status').textContent=e.message}})();
 </script>
 </body></html>

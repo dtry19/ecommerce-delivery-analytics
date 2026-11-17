@@ -10,7 +10,7 @@ WITH item_totals AS (
    PARTITION BY order_id ORDER BY review_creation_date DESC, review_id DESC
  ) AS review_rank FROM raw_reviews
 )
-SELECT o.order_id, o.customer_id, c.customer_state,
+SELECT o.order_id, o.customer_id, c.customer_unique_id, c.customer_state,
        o.order_status, o.order_purchase_timestamp AS purchased_at,
        o.order_delivered_customer_date AS delivered_at,
        o.order_estimated_delivery_date AS estimated_at,
@@ -49,3 +49,6 @@ JOIN mart_orders m USING(order_id)
 JOIN raw_sellers s USING(seller_id);
 CREATE UNIQUE INDEX idx_mart_order ON mart_orders(order_id);
 CREATE UNIQUE INDEX idx_mart_seller_order ON mart_seller_orders(order_id,seller_id);
+CREATE INDEX idx_orders_state_purchase ON mart_orders(customer_state,purchased_at);
+CREATE INDEX idx_orders_purchase ON mart_orders(purchased_at);
+CREATE INDEX idx_seller_orders_seller ON mart_seller_orders(seller_id,order_id);
