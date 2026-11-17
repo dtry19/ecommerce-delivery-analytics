@@ -4,14 +4,45 @@ A reproducible Python + SQLite analytics project with a browser dashboard.
 Investigate late deliveries by purchase month, customer state, and seller;
 compare customer reviews for late and on-time deliveries.
 
-**Status:** working portfolio starter. The included generator produces synthetic
-data, not empirical findings. Replace it with sourced data and write your own
-analysis before describing this as a completed business study.
+**Real-data edition:** 413,851 loaded source rows, including **112,650 order items
+across 99,441 distinct orders**, from the Olist Brazilian marketplace dataset.
+The complete archive also includes 1,000,163 geolocation rows; those are not part
+of the pipeline's loaded-row claim. Statistical analyses use 92,747 unique
+customers with eligible deliveries and reviews. See [measured findings](reports/findings.md)
+and [resume bullets](reports/resume_bullets.md).
 
-## Run locally
+## Reproduce the real-data study
 
-Requires Python 3.10+ with SQLite support. No pip installs, credentials, or paid
-services are needed. Windows users can substitute `py` for `python`.
+Requires Python 3.11+ for the pinned statistical dependencies. Use a virtual
+environment, then run these commands from this repository:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python download_data.py
+python pipeline.py
+python research.py
+python -m unittest discover -s tests -v
+python server.py
+```
+
+`download_data.py` fetches Olist version 2 directly from its public Kaggle endpoint,
+verifies the archive SHA-256, and records per-file checksums and logical CSV row
+counts. It refuses to overwrite differing source files. For an existing archive,
+use `python download_data.py --archive /path/to/archive.zip`.
+A dataset/source change fails verification until intentionally reviewed.
+Raw CSVs and generated databases stay local and are ignored by Git.
+
+`research.py` writes reproducible results, SQL analysis CSVs, regression
+coefficients, a findings memo, resume bullets, and star-schema BI exports under
+`reports/`. The dashboard research panel checks the database build timestamp and
+rejects stale results. Run `research.py` again after rebuilding the database.
+
+## Run the lightweight synthetic demo
+
+Requires Python 3.10+ with SQLite support. The demo pipeline and server use the Python standard library. Statistical research
+requires `requirements.txt`; the real-data study above is the portfolio evidence. Windows users can substitute `py` for `python`.
 
 ```bash
 python pipeline.py --demo
@@ -62,6 +93,11 @@ current Amazon operations.
 - Review comparison with reviewed-order counts.
 - CSV export for the filtered order cohort.
 - Visible source, refresh timestamp, and excluded-delivery counts.
+- Delay severity buckets with order shares, associated merchandise value,
+  review coverage, and the percentage of reviewed orders with 1–2 star scores.
+- Shipping-route investigation by seller state and customer state, with a
+  configurable minimum delivery count shared with the seller queue.
+- Month-to-month late-rate changes in percentage points in the monthly detail table.
 
 ## Data model and metric definitions
 
@@ -93,9 +129,29 @@ prevents item/review joins from multiplying order counts and merchandise values.
 
 All charts use purchase cohorts. Reviews and eventual delivery outcomes are
 historical outcomes, not an as-of-date snapshot. Minimum seller volume affects
-only the seller table. Filtering a state can change which sellers meet it.
+the seller and shipping-route tables. Filtering a state can change which groups meet it.
 Recent or incomplete cohorts can be biased toward already delivered orders.
 Delivery/review relationships are observational, not causal.
+
+### Expanded operations analysis
+
+Severity buckets are on time, 1–3 days late, 4–7 days late, and 8+ days late.
+They partition eligible deliveries and exclude invalid delivery dates. Their
+merchandise values describe associated order value, not financial losses.
+Low-review percentages divide 1–2 star reviews by reviewed orders in the bucket;
+orders without reviews do not enter this denominator.
+
+Shipping routes count distinct order/origin-state/destination-state pairs.
+Two sellers in the same origin state on one order contribute one route delivery.
+An order with sellers in different origin states contributes to each route,
+so route counts cannot be added to recover total orders. Delivery timing is
+order-level and does not identify which seller or carrier caused a delay.
+The top 20 routes are ranked by late count, then late rate.
+
+Monthly changes use SQL `LAG` and compare consecutive calendar months only.
+A missing month or a cohort without eligible deliveries produces no comparison.
+For example, moving from 10% to 15% is a +5 percentage-point change.
+All new panels follow the purchase-date and customer-state filters.
 
 ## Validation and tests
 
@@ -111,7 +167,9 @@ Order counts and item-price totals are reconciled after model creation.
 
 Tests cover order grain, multiple reviews, multiple sellers, same-day deadlines,
 missing delivery dates, invalid references, refresh preservation, API filtering,
-empty cohorts, SQL analyses, and HTTP dashboard/export responses.
+empty cohorts, SQL analyses, and HTTP dashboard/export responses. Additional
+fixtures verify severity boundaries, missing reviews, route deduplication,
+route thresholds, and monthly comparisons across gaps or excluded cohorts.
 
 ## Repository guide
 
@@ -125,35 +183,52 @@ empty cohorts, SQL analyses, and HTTP dashboard/export responses.
 | `tests/test_project.py` | Business-rule and integration tests |
 | `docs/analysis_memo.md` | Template for your own evidence-backed findings |
 
+## Advanced SQL, statistics, and BI
+
+- `sql/warehouse.sql`: explicit star-schema DDL, primary/foreign keys, CHECK
+  constraints, and a customer-level statistical sample selected with ROW_NUMBER.
+- `sql/advanced_analysis.sql`: recursive date spine, weighted rolling rates,
+  LAG comparisons, DENSE_RANK seller ranking, cumulative Pareto shares, SQL
+  Wilson intervals, and observed repeat-purchase cohorts.
+- `research.py`: Welch's unequal-variance t-test with 95% CI and Cohen's d,
+  Pearson chi-squared with expected-cell checks and Cramer's V, Mann-Whitney
+  sensitivity test, Holm correction, and OLS with HC3 robust standard errors.
+- Composite state/date indexes and `EXPLAIN QUERY PLAN` benchmarking compare
+  identical query results before and after indexing on a disposable copy.
+- Native [Excel report](reports/ecommerce_analysis.xlsx). It contains formula-driven monthly rates and a native line chart.
+  Monthly source counts are a saved SQL export, not a live database connection.
+- `reports/bi/`: order and item facts plus date/customer/seller dimensions for
+  Excel, Power BI or Tableau import. See [BI model guide](docs/bi_model.md).
+  Import files and model instructions are provided; this is not a claim that a
+  Power BI or Tableau dashboard has been built or deployed.
+- [Interview guide](docs/interview_guide.md) maps the implementation to the BIE
+  job requirements and explains the analytical choices.
+- `.github/workflows/tests.yml` defines automated fixture validation on pushes
+  and pull requests. Local checks have been run; hosted CI has not run until
+  the branch is pushed.
+
 ## Publish to GitHub
 
-Create an empty GitHub repository named `delivery-performance-dashboard`, then
-run these commands from this project folder. Replace the placeholder URL with
-your actual repository URL before the final commands.
-
-```bash
-git init
-git add .
-git commit -m "Build delivery performance pipeline and dashboard"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/delivery-performance-dashboard.git
-git push -u origin main
-```
+This project is cloned from `dtry19/ecommerce-delivery-analytics`. Changes are
+local on `codex/operations-analytics-expansion`. Review before committing and
+pushing; do not initialize another repository or replace the existing remote.
 
 The `.gitignore` excludes generated databases, raw data, and demo CSVs. The demo
 can be regenerated from code. GitHub Pages cannot run the Python server: use
 screenshots in the README or a separately hosted application for a live demo.
 
-## Make this your portfolio work
+## Source and interpretation
 
-1. Run it on sourced data, document the source and access date, and inspect warnings.
-2. Add dashboard screenshots to `docs/` and embed them in this README.
-3. Complete `docs/analysis_memo.md` with measured results and limitations.
-4. Add an original question, such as whether late rates persist across months.
-5. Be able to explain the join grain, denominators, review selection, and checks.
+Olist publishes the dataset at
+[its Kaggle data card](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce).
+The publisher's metadata identifies version 2, updated October 1, 2021, under
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).
+See [data provenance](docs/data_provenance.md) for hashes and exact row counts.
+Preserve source attribution and the stated dataset terms when sharing derived
+materials. This repository's pipeline does not publish the raw files.
 
-Suggested truthful resume structure after completing your analysis:
-"Built a Python/SQL delivery analytics pipeline for [actual N] orders, validated
-order-level counts and merchandise totals, and developed an interactive dashboard
-to identify [measured finding]." Do not claim reduced delays or improved business
-outcomes unless the recommendations were implemented and evaluated.
+The review gap is an observational association in historical Olist data.
+It does not establish that lateness caused the entire difference or that a
+proposed operational intervention improved business outcomes. The findings
+memo records review selection, customer dependence, date exclusions, regression
+assumptions and cohort censoring. Read it before using the resume entry.

@@ -6,3 +6,6 @@ data/processed/
 data/demo/
 output/
 .DS_Store
+reports/bi/
+outputs/
+tmp/

@@ -4,14 +4,19 @@ import csv
 import io
 import json
 import sqlite3
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 from pipeline import DB, ROOT
 
+@contextmanager
 def connect(db):
     con = sqlite3.connect(db.resolve().as_uri()+'?mode=ro',uri=True)
     con.row_factory = sqlite3.Row
-    return con
+    try:
+        yield con
+    finally:
+        con.close()
 
 def rows(con,query,params=()):
     return [dict(r) for r in con.execute(query,params).fetchall()]
@@ -42,10 +47,17 @@ def get_data(db,filters):
           SUM(CASE WHEN order_status='canceled' THEN 1 ELSE 0 END) AS canceled_orders,
           SUM(CASE WHEN order_status='delivered' AND delivery_eligible=0 THEN 1 ELSE 0 END) AS excluded_deliveries
           FROM filtered""")[0]
-        monthly=rows(con,"""SELECT purchase_month,COUNT(*) AS orders,
+        monthly=rows(con,"""WITH cohorts AS (SELECT purchase_month,COUNT(*) AS orders,
           SUM(delivery_eligible) AS eligible_deliveries,
           SUM(CASE WHEN delivery_eligible=1 AND delay_days>0 THEN 1 ELSE 0 END) AS late_deliveries,
-          SUM(merchandise_value) AS merchandise_value FROM filtered GROUP BY purchase_month ORDER BY purchase_month""")
+          SUM(merchandise_value) AS merchandise_value FROM filtered GROUP BY purchase_month)
+          SELECT *,100.0*late_deliveries/NULLIF(eligible_deliveries,0) AS late_rate_pct,
+          CASE WHEN date(purchase_month||'-01','-1 month') =
+            LAG(purchase_month) OVER (ORDER BY purchase_month)||'-01'
+          THEN 100.0*late_deliveries/NULLIF(eligible_deliveries,0) -
+            LAG(100.0*late_deliveries/NULLIF(eligible_deliveries,0)) OVER (ORDER BY purchase_month)
+          END AS late_rate_change_pp
+          FROM cohorts ORDER BY purchase_month""")
         states=rows(con,"""SELECT customer_state,COUNT(*) AS orders,SUM(delivery_eligible) AS eligible_deliveries,
           SUM(CASE WHEN delivery_eligible=1 AND delay_days>0 THEN 1 ELSE 0 END) AS late_deliveries
           FROM filtered GROUP BY customer_state ORDER BY late_deliveries DESC""")
@@ -62,7 +74,34 @@ def get_data(db,filters):
           FROM mart_seller_orders s JOIN filtered f USING(order_id) WHERE s.delivery_eligible=1
           GROUP BY s.seller_id,s.seller_state HAVING COUNT(*)>=?
           ORDER BY late_orders DESC,late_rate_pct DESC,s.seller_id LIMIT 20""",[minimum])
-        return {'summary':summary,'monthly':monthly,'states':states,'reviews':reviews,'sellers':sellers}
+        severity=rows(con,"""WITH classified AS (
+          SELECT *,CASE WHEN delay_days<=0 THEN 0 WHEN delay_days<=3 THEN 1
+            WHEN delay_days<=7 THEN 2 ELSE 3 END AS severity_rank
+          FROM filtered WHERE delivery_eligible=1
+        ), buckets(severity_rank,delivery_group) AS (
+          VALUES (0,'On time'),(1,'1–3 days late'),(2,'4–7 days late'),(3,'8+ days late')
+        ) SELECT b.delivery_group,COUNT(c.order_id) AS eligible_deliveries,
+          COALESCE(SUM(c.merchandise_value),0) AS merchandise_value,
+          COUNT(c.review_score) AS reviewed_orders,AVG(c.review_score) AS average_review,
+          SUM(CASE WHEN c.review_score<=2 THEN 1 ELSE 0 END) AS low_reviews
+        FROM buckets b LEFT JOIN classified c USING(severity_rank)
+        GROUP BY b.severity_rank,b.delivery_group ORDER BY b.severity_rank""")
+        # Deduplicate route/order pairs before aggregation: multiple sellers in
+        # the same origin state must never inflate the route denominator.
+        routes=rows(con,"""WITH route_orders AS (
+          SELECT DISTINCT s.order_id,s.seller_state,f.customer_state,
+            f.delay_days,f.delivery_days
+          FROM mart_seller_orders s JOIN filtered f USING(order_id)
+          WHERE f.delivery_eligible=1
+        ) SELECT seller_state,customer_state,COUNT(*) AS eligible_orders,
+          SUM(CASE WHEN delay_days>0 THEN 1 ELSE 0 END) AS late_orders,
+          100.0*SUM(CASE WHEN delay_days>0 THEN 1 ELSE 0 END)/COUNT(*) AS late_rate_pct,
+          AVG(CASE WHEN delay_days>0 THEN delay_days END) AS average_late_days
+        FROM route_orders GROUP BY seller_state,customer_state
+        HAVING COUNT(*)>=? ORDER BY late_orders DESC,late_rate_pct DESC,
+          seller_state,customer_state LIMIT 20""",[minimum])
+        return {'summary':summary,'monthly':monthly,'states':states,'reviews':reviews,
+                'sellers':sellers,'severity':severity,'routes':routes}
 
 def metadata(db):
     with connect(db) as con:
@@ -70,6 +109,15 @@ def metadata(db):
         info.update(rows(con,'SELECT MIN(date(purchased_at)) AS start,MAX(date(purchased_at)) AS end FROM mart_orders')[0])
         info['states']=[r[0] for r in con.execute('SELECT DISTINCT customer_state FROM mart_orders ORDER BY customer_state')]
         return info
+
+def research_results(db,report=None):
+    report=report or ROOT/'reports/results.json'
+    if not report.exists():
+        raise ValueError('Research report missing. Run: python research.py')
+    result=json.loads(report.read_text())
+    if result['source']['built_at_utc']!=metadata(db)['built_at_utc']:
+        raise ValueError('Research report is stale. Run: python research.py')
+    return result
 
 def make_handler(db):
     class Handler(BaseHTTPRequestHandler):
@@ -90,6 +138,8 @@ def make_handler(db):
                     return self.send(json.dumps(metadata(db)).encode())
                 if parsed.path=='/api/data':
                     return self.send(json.dumps(get_data(db,parse_qs(parsed.query))).encode())
+                if parsed.path=='/api/research':
+                    return self.send(json.dumps(research_results(db)).encode())
                 if parsed.path=='/api/export':
                     where,params=where_clause(parse_qs(parsed.query))
                     with connect(db) as con:

@@ -2,8 +2,11 @@
 import argparse
 import csv
 import json
+import hashlib
+import math
 import random
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -15,7 +18,7 @@ TABLES = {
   'order_id':'TEXT PRIMARY KEY','customer_id':'TEXT','order_status':'TEXT',
   'order_purchase_timestamp':'TEXT','order_delivered_customer_date':'TEXT',
   'order_estimated_delivery_date':'TEXT'}),
- 'customers': ('olist_customers_dataset.csv', {'customer_id':'TEXT PRIMARY KEY','customer_state':'TEXT'}),
+ 'customers': ('olist_customers_dataset.csv', {'customer_id':'TEXT PRIMARY KEY','customer_unique_id':'TEXT','customer_state':'TEXT'}),
  'sellers': ('olist_sellers_dataset.csv', {'seller_id':'TEXT PRIMARY KEY','seller_state':'TEXT'}),
  'items': ('olist_order_items_dataset.csv', {'order_id':'TEXT','order_item_id':'INTEGER',
   'seller_id':'TEXT','price':'REAL','freight_value':'REAL'}),
@@ -41,7 +44,7 @@ def make_demo(directory, n=1500):
     for i in range(n):
         oid, cid = f'o{i:06}', f'c{i:06}'
         state = rng.choice(states)
-        customers.append({'customer_id':cid,'customer_state':state})
+        customers.append({'customer_id':cid,'customer_unique_id':cid,'customer_state':state})
         purchase = datetime(2024,1,1)+timedelta(days=rng.randrange(365),hours=rng.randrange(24))
         estimated = (purchase+timedelta(days=rng.randint(8,16))).replace(hour=0)
         late = rng.random() < (0.32 if state=='BA' else 0.13)
@@ -76,17 +79,20 @@ def load_csv(con, directory):
         con.execute(f'CREATE TABLE raw_{name} ({definitions})')
         with path.open(encoding='utf-8-sig',newline='') as f:
             reader = csv.DictReader(f)
-            missing = set(columns)-set(reader.fieldnames or [])
+            # Legacy demo/input files may omit the stable customer identity.
+            missing = set(columns)-set(reader.fieldnames or [])-{'customer_unique_id'}
             if missing:
                 raise ValueError(f'{filename}: missing columns {sorted(missing)}')
             rows=[]
             for line,row in enumerate(reader,2):
                 values=[]
                 for key,kind in columns.items():
-                    value=row[key].strip()
+                    value=(row.get(key) or (row.get('customer_id') if key=='customer_unique_id' else '')).strip()
                     if value and kind in ('REAL','INTEGER'):
                         try:
                             value=float(value) if kind=='REAL' else int(value)
+                            if not math.isfinite(value):
+                                raise ValueError('Non-finite number')
                         except ValueError as e:
                             raise ValueError(f'{filename}:{line}: invalid {key}') from e
                     values.append(value if value!='' else None)
@@ -125,6 +131,9 @@ def build(directory=RAW, db=DB):
         load_csv(con,directory)
         checks = validate_raw(con)
         con.executescript((ROOT/'sql/models.sql').read_text())
+        con.executescript((ROOT/'sql/warehouse.sql').read_text())
+        if con.execute('PRAGMA foreign_key_check').fetchall():
+            raise ValueError('Warehouse foreign key validation failed')
         raw_count = con.execute('SELECT COUNT(*) FROM raw_orders').fetchone()[0]
         mart_count = con.execute('SELECT COUNT(*) FROM mart_orders').fetchone()[0]
         if raw_count!=mart_count:
@@ -135,13 +144,23 @@ def build(directory=RAW, db=DB):
             raise ValueError('Merchandise value reconciliation failed')
         warning_count = con.execute("SELECT COUNT(*) FROM mart_orders WHERE order_status='delivered' AND delivery_eligible=0").fetchone()[0]
         source = 'SYNTHETIC DEMO' if (directory/'demo_marker.json').exists() else 'USER-SUPPLIED CSV'
+        provenance=None
+        manifest=directory/'source_manifest.json'
+        if source!='SYNTHETIC DEMO' and manifest.exists():
+            provenance=json.loads(manifest.read_text())
+            for filename,record in provenance['files'].items():
+                if hashlib.sha256((directory/filename).read_bytes()).hexdigest()!=record['sha256']:
+                    raise ValueError(f'Source checksum mismatch: {filename}')
+            source='OLIST PUBLIC DATASET'
         metadata = {'source':source,'built_at_utc':datetime.now(timezone.utc).isoformat(),
-          'order_count':raw_count,'ineligible_delivered_orders':warning_count,'checks':checks}
+          'order_count':raw_count,'ineligible_delivered_orders':warning_count,'checks':checks,
+          'raw_row_counts':{name:con.execute(f'SELECT COUNT(*) FROM raw_{name}').fetchone()[0] for name in TABLES},
+          'provenance':provenance}
         con.execute('CREATE TABLE metadata (payload TEXT)')
         con.execute('INSERT INTO metadata VALUES (?)',(json.dumps(metadata),))
         con.commit()
         temporary = db.with_suffix('.tmp')
-        with sqlite3.connect(temporary) as target:
+        with closing(sqlite3.connect(temporary)) as target, target:
             con.backup(target)
         temporary.replace(db)
         return metadata
